@@ -95,7 +95,7 @@ do
 	-s|--slots)	 slots=$2 ; shift 2				  		  ;;
 	--no-check)      dependencyCheck='False' ; shift 1                                ;;
 	-q|--quiet)	 quietOutput='/dev/null' ; shift 1			 	  ;;
-	-v|--version)    printf 'Version: 4.5.1 - Binary Jam\n' ; exit 0 ; shift 1 	  ;;
+	-v|--version)    printf 'Version: 5.4.1 - Angry Secretary\n' ; exit 0 ; shift 1   ;;
 	-h|--help)       help '0' ; shift 1 				  		  ;;
 	*)               printf 'Invalid Option\n' ; help '1' 		  		  ;;
 	esac
@@ -191,14 +191,14 @@ fi
 function NETWORKING(){
 	if [[ -z $networkRoute ]]
 	then
-		local networkRoute=$(awk '/([0-9].*\.){3}([0-9].*){1,3}\/([0-9].){1,2} dev wlan0/' <<< "$(ip route show)")
+		local networkRoute=$(grep -Eo "^(([0-9]){1,3}\.){3}([0-9]){1,3}\/([0-9]){1,2}.*proto kernel(.){1,2}scope" <<< "$(ip route show)" | sed 's/ .*//g')
 		if [[ -z $networkRoute ]]
 		then
 			printf "[%bFAIL%b] Could not discover network address.\n       Try manually specifying a network address\n       using the -n|--network flag.\n" $RED $NC
 			exit 1
 		fi
 	else
-		if [ $(grep -Ex "(([0-9]){1,3}\.){3}([0-9]){1,3}\/([0-9]){1,2}" <<< $networkRoute || printf '1') == '1' ]
+		if [ $(grep -Ex "(([0-9]){1,3}\.){3}([0-9]){1,3}\/([0-9]){1,2}" <<< $networkRoute || printf '1') == '1' ] || [[ $(grep -Eo "([0-9]){1,2}$" <<< $networkRoute) -gt 30 ]] || [[ $(grep -Eo "([0-9]){1,2}$" <<< $networkRoute) -lt 8 ]]
 		then
 			printf "[%bFAIL%b] Invalid network address. Exiting\n" $RED $NC
 			exit 1
@@ -208,6 +208,22 @@ function NETWORKING(){
 	local NETWORKADDR=($(grep -Eo ".*\/" <<< "$networkRoute" | sed -E 's/\///;s/\./ /g'))
         local CIDR=$(grep -Eo "\/([0-9]){1,2}" <<< "$networkRoute" | sed 's/\///')
         local HOSTS=$((2**(32-$CIDR)-2))
+
+	####
+	if [[ ${NETWORKADDR[0]} == 10 ]]
+	then
+		:
+	elif [[ ${NETWORKADDR[0]} == 172 ]] && [[ $(grep -Ex "^1[6-9]|^2[0-9]|^3[0-1]" <<< ${NETWORKADDR[1]} || printf '1') != '1' ]]
+	then
+		:
+	elif [[ ${NETWORKADDR[0]} == 192 ]] && [[ ${NETWORKADDR[1]} == 168 ]]
+	then
+		:
+	else
+		printf "[%bFAIL%b] Not a private address. Exiting\n" $RED $NC
+		exit 1
+	fi
+	####
 
         printf "[%bINFO%b] Need to scan: %s hosts\n" $YELLOW $NC $HOSTS
 	printf "[%bINFO%b] Starting address expansion for network: %s\n" $YELLOW $NC $networkRoute
@@ -228,6 +244,20 @@ function NETWORKING(){
                         NETWORKADDR[1]=$((${NETWORKADDR[1]}+1))
                         NETWORKADDR[2]='0'
                 fi
+		if [ ${NETWORKADDR[0]} == 10 ] && [ ${NETWORKADDR[1]} == 255 ] && [ ${NETWORKADDR[2]} == 255 ] && [ ${NETWORKADDR[3]} == 255 ] 
+		then
+			break
+		fi
+		if [ ${NETWORKADDR[0]} == 172 ] && [ ${NETWORKADDR[1]} == 31 ] && [ ${NETWORKADDR[2]} == 255 ] && [ ${NETWORKADDR[3]} == 255 ]
+		then
+			break
+		fi
+
+		if [ ${NETWORKADDR[0]} == 192 ] && [ ${NETWORKADDR[1]} == 168 ] && [ ${NETWORKADDR[2]} == 255 ] && [ ${NETWORKADDR[3]} == 255 ]
+		then
+			break
+		fi
+
                 addr=$((addr+1))
 
                 a=${NETWORKADDR[@]}
