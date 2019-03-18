@@ -149,7 +149,7 @@ fi
 function output(){
 
 function checkDependencies(){
-	dependencies=(curl parallel sed grep awk ip)
+	dependencies=(curl parallel sed grep ip)
 	for check in ${dependencies[@]}
 	do
 		if [ -z `which $check` ]
